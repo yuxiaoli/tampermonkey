@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Copy HTML / Clean HTML / Markdown (Turndown) - FA Copy Icon + Busy Border
 // @namespace    https://tampermonkey.net/
-// @version      2.3
-// @description  Copy original DOM HTML (without our UI), clean HTML, or Markdown converted from cleaned DOM. Uses a Font Awesome copy icon button. Busy indicator is a circular spinner using ONLY the button border.
+// @version      2.4
+// @description  Copy original DOM HTML (without our UI), clean HTML, or Markdown converted from cleaned DOM. Uses a Font Awesome copy icon button. Shows a green checkmark on success.
 // @match        *://*/*
 // @run-at       document-end
 // @require      https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js
@@ -237,24 +237,34 @@
   }
 
   /* =========================
-     Busy indicator: rounded-square spinner using ONLY the button border
-     - We animate the border by rotating a pseudo-element around the button.
-     - No separate loader element.
+     Icon Paths
      ========================= */
-  function setBusy(isBusy) {
+  const ICONS = {
+    copy: 'M384 336l-192 0c-8.8 0-16-7.2-16-16l0-256c0-8.8 7.2-16 16-16l140.1 0c4.2 0 8.3 1.7 11.3 4.7l40 40c3 3 4.7 7.1 4.7 11.3l0 216c0 8.8-7.2 16-16 16zM192 368l192 0c26.5 0 48-21.5 48-48l0-216c0-12.7-5.1-24.9-14.1-33.9l-40-40C368.9 21.1 356.7 16 344 16L192 16c-26.5 0-48 21.5-48 48l0 256c0 26.5 21.5 48 48 48zM64 128c-35.3 0-64 28.7-64 64L0 448c0 35.3 28.7 64 64 64l192 0c35.3 0 64-28.7 64-64l0-32-32 0 0 32c0 17.7-14.3 32-32 32L64 480c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l32 0 0-32-32 0z',
+    check: 'M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z'
+  };
+
+  /* =========================
+     Success Feedback
+     ========================= */
+  let successTimer = null;
+  function showSuccess() {
     const btn = document.getElementById(BTN_ID);
     if (!btn) return;
-    if (isBusy) btn.setAttribute('data-busy', '1');
-    else btn.removeAttribute('data-busy');
-  }
-
-  async function withBusy(fn) {
-    setBusy(true);
-    try {
-      return await fn();
-    } finally {
-      setBusy(false);
-    }
+    
+    // Icon -> Check
+    const path = btn.querySelector('path');
+    if (path) path.setAttribute('d', ICONS.check);
+    
+    // Color -> Green
+    btn.style.color = '#28a745';
+    
+    if (successTimer) clearTimeout(successTimer);
+    successTimer = setTimeout(() => {
+        if (path) path.setAttribute('d', ICONS.copy);
+        btn.style.color = '#111';
+        successTimer = null;
+    }, 1500);
   }
 
   /* =========================
@@ -274,7 +284,7 @@
 
     // Path data for FA "copy" (solid)
     const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', 'M384 336l-192 0c-8.8 0-16-7.2-16-16l0-256c0-8.8 7.2-16 16-16l140.1 0c4.2 0 8.3 1.7 11.3 4.7l40 40c3 3 4.7 7.1 4.7 11.3l0 216c0 8.8-7.2 16-16 16zM192 368l192 0c26.5 0 48-21.5 48-48l0-216c0-12.7-5.1-24.9-14.1-33.9l-40-40C368.9 21.1 356.7 16 344 16L192 16c-26.5 0-48 21.5-48 48l0 256c0 26.5 21.5 48 48 48zM64 128c-35.3 0-64 28.7-64 64L0 448c0 35.3 28.7 64 64 64l192 0c35.3 0 64-28.7 64-64l0-32-32 0 0 32c0 17.7-14.3 32-32 32L64 480c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l32 0 0-32-32 0z');
+    path.setAttribute('d', ICONS.copy);
     svg.appendChild(path);
     return svg;
   }
@@ -293,10 +303,13 @@
     // Icon
     btn.appendChild(createCopyIconSvg());
 
-    // Click -> copy by mode with busy border
-    btn.addEventListener('click', () => withBusy(async () => {
-      try { await copyByMode(); } catch (e) { logError(e); }
-    }));
+    // Click -> copy by mode with success feedback
+    btn.addEventListener('click', async () => {
+      try {
+        await copyByMode();
+        showSuccess();
+      } catch (e) { logError(e); }
+    });
 
     document.documentElement.appendChild(btn);
 
@@ -350,33 +363,15 @@
         opacity: 0.9;
       }
 
-      /* Busy indicator: Circular spinner overlay (smoother than rotating square).
-         We draw a border via pseudo-element, make one side darker, then rotate it. */
-      #${BTN_ID}[data-busy="1"]{
-        /* Keep button clickable? You can disable click by uncommenting:
-        pointer-events:none;
-        */
-      }
-      #${BTN_ID}[data-busy="1"]::after{
-        content:"";
-        position:absolute;
-        inset:-2px;              /* slightly outside to cover border */
-        border-radius:50%;       /* circle to avoid wobble */
-        border:2px solid rgba(0, 200, 90, 0.22);
-        border-top-color: rgba(0, 200, 90, 0.95);
-        border-right-color: rgba(0, 200, 90, 0.55);
-        border-bottom-color: rgba(0, 200, 90, 0.22);
-        border-left-color: rgba(0, 200, 90, 0.22);
-        animation: __tm_btn_spin 0.75s linear infinite;
-        pointer-events:none;
-      }
-      @keyframes __tm_btn_spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+      /* Busy indicator removed */
+
     `);
 
     // Tag our injected style node(s) so we can remove them from captured HTML
     setTimeout(() => {
       const styles = Array.from(document.querySelectorAll('style'));
-      const btnStyle = styles.find(s => (s.textContent || '').includes(`#${BTN_ID}{`) && (s.textContent || '').includes('__tm_btn_spin'));
+      const btnStyle = styles.find(s => (s.textContent || '').includes(`#${BTN_ID}{`));
       if (btnStyle) btnStyle.id = BTN_STYLE_ID;
 
       const iconStyle = styles.find(s => (s.textContent || '').includes('.__tm_copy_icon_svg'));
@@ -395,9 +390,12 @@
     document.addEventListener('keydown', (e) => {
       if (isTypingTarget(e.target)) return;
 
-      const run = (fn) => withBusy(async () => {
-        try { await fn(); } catch (err) { logError(err); }
-      });
+      const run = async (fn) => {
+        try {
+          await fn();
+          showSuccess();
+        } catch (err) { logError(err); }
+      };
 
       if (matchesHotkey(e, HK_BY_MODE)) { e.preventDefault(); run(copyByMode); return; }
       if (matchesHotkey(e, HK_ORIG))    { e.preventDefault(); run(copyOriginal); return; }
@@ -414,10 +412,6 @@
     registerMenu();
     registerHotkeys();
     addButton();
-
-    // Show busy border briefly on init (so you can tell it loaded)
-    setBusy(true);
-    setTimeout(() => setBusy(false), 650);
   }
 
   init().catch(logError);
